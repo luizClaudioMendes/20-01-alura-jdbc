@@ -8,6 +8,7 @@ import java.sql.Statement;
 
 import br.jdbc.Connection.ConnectionPool;
 
+@Deprecated
 public class TestaInsercao {
 
 	public static void main(String[] args) throws SQLException {		

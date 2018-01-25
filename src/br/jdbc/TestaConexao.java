@@ -7,6 +7,7 @@ import javax.sql.DataSource;
 
 import br.jdbc.Connection.ConnectionPool;
 
+@Deprecated
 public class TestaConexao {
 
 	public static void main(String[] args) throws SQLException {
