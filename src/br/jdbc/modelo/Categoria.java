@@ -1,9 +1,12 @@
 package br.jdbc.modelo;
 
+import java.util.List;
+
 public class Categoria {
 	
 	private Integer id;
-	private String descricao;
+	private String nome;
+	private List<Produto> produtos;
 	
 	public Categoria() {
 		super();
@@ -12,7 +15,7 @@ public class Categoria {
 	public Categoria(Integer id, String descricao) {
 		super();
 		this.id = id;
-		this.descricao = descricao;
+		this.nome = descricao;
 	}
 
 	public Integer getId() {
@@ -23,15 +26,25 @@ public class Categoria {
 		this.id = id;
 	}
 
-	public String getDescricao() {
-		return descricao;
+	public String getNome() {
+		return nome;
 	}
 
-	public void setDescricao(String descricao) {
-		this.descricao = descricao;
+	public void setNome(String nome) {
+		this.nome = nome;
+	}
+
+	public List<Produto> getProdutos() {
+		return produtos;
+	}
+
+	public void setProdutos(List<Produto> produtos) {
+		this.produtos = produtos;
 	}
 	
-	
-	
+	@Override
+	public String toString() {
+		return "["+id+"]"+" " +nome;
+	}
 
 }
