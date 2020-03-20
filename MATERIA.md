@@ -167,3 +167,96 @@ Ficamos com um código final que executa um select e imprime os ids, nomes e des
 ```
 
 
+## AULA 2
+Desejamos inserir um novo produto, um notebook, e para isso executamos o mesmo processo de antes.
+
+criamos uma classe chamada **TestaInserçao** e colocamos um método *main*.
+no método main:
+
+```java
+public static void main(String[] args) throws SQLException {
+		Connection connection = DriverManager.getConnection("jdbc:mysql://localhost:3306/loja-virtual", "root", "root");
+ 		System.out.println("Conexao Aberta!");
+ 		
+ 		Statement stmt = connection.createStatement();
+ 		boolean resultado = stmt.execute("insert into Produto (nome, descricao) values ('Notebook', 'Notebook i5')");
+ 		System.out.println("O resultado foi: " + resultado);
+
+ 		stmt.close();
+ 		connection.close();
+ 		System.out.println("Conexao Fechada!");
+	}
+```
+
+Executando o código acima obtemos o resultado esperado: **false**. E se fizermos um select no banco de dados temos que o notebook foi inserido com sucesso:
+
+-  Apesar de ter funcionado, é interessante extrairmos o código que abre a conexão para um método separado. Criamos uma classe chamada **Database** com o método *getConnection*:
+  ```java
+ public static Connection getConnection() throws SQLException {
+		Connection connection = DriverManager.getConnection("jdbc:mysql://localhost:3306/loja-virtual", "root", "root");
+ 		System.out.println("Conexao Aberta!");
+		return connection;
+	}
+```
+
+Apesar do código funcionar, **repare que não ficamos sabendo o ID que foi gerado dentro do código Java**. 
+
+**Somente através de um select posterior seríamos capazes - de maneira complicada - de descobrir o id gerado. **
+
+###### Na verdade a **API do Statement** nos entrega todas as chaves que foram geradas automaticamente caso utilizemos a configuração **Statement.RETURN_GENERATED_KEYS**.
+
+Ao executar o statement passamos a opção mencionada como segundo argumento:
+
+```java
+boolean resultado = statement.execute("insert into Produto (nome, descricao) values ('Notebook', 'Notebook i5')", Statement.RETURN_GENERATED_KEYS);
+```
+
+Agora o método getGeneratedKeys nos retorna um ResultSet com todas as chaves geradas:
+
+       
+
+    ResultSet resultSet = statement.getGeneratedKeys();
+
+Já sabemos iterar por um resultSet, portanto podemos imprimir todas as chaves que foram geradas. No nosso caso só será gerada a chave para o campo id, portanto fazemos um laço e imprimos o resultado do campo gerado ID:
+     
+
+      while (resultSet.next()) {
+                String id = resultSet.getString("id");
+                System.out.println(id + " gerado");
+            }
+
+Rodamos a aplicação mais algumas vezes até obter o resultado para o notebook:
+5 gerado
+
+Isso ocorreu pois temos agora três notebooks no banco. Executando o select no banco conseguimos notar esta repetição.
+
+Queremos executar um delete para remover dois deles, para isto criamos uma nova classe **TestaRemocao**:
+```java
+public static void main(String[] args) throws SQLException {
+		Connection connection = Database.getConnection();
+ 		
+ 		Statement stmt = connection.createStatement();
+ 		int resultado = stmt.executeUpdate("delete from Produto where id>3");
+ 		System.out.println("Foram atualizadas: " + resultado+ " linhas.");
+ 		stmt.close();
+ 		connection.close();
+ 		System.out.println("Conexao Fechada!");
+	}
+```
+
+Mas antes de executar o delete, como descobrir quantas linhas foram removidas? Quero ter certeza que os dois notebooks extras serão removidos. 
+
+Lembre-se que uma remoção também é uma atualização do banco. 
+
+O método *getUpdateCount* diz o número de linhas atualizadas:
+      
+
+     int count = stmt.getUpdateCount();
+     System.out.println(count + " linhas atualizadas");
+	 
+Pronto! Executamos o programa e temos sucesso: somente 2 linhas foram removidas. 
+
+###### Como vimos, o JDBC é uma especificação que generaliza o acesso aos banco de dados relacionais, permitindo focarmos no SQL e trabalhar de maneira uniforme com a interface de Conexão, execução de Statement e resultados (ResultSet).
+
+
+
