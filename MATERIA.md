@@ -352,4 +352,210 @@ Pergunta: ***Quais os riscos de utilizar um Statement ao invés de um PreparedSt
 ###### Os riscos de se utilizar um statement ao invés de um prepared statement são de erros com caracteres que não são escapados automaticamente, quebrando a query e de código malicioso que pode ser inserido no input do usuário (como um delete) que será injetado na query a ser executada e rodará sem erros.
 
 
+## AULA 4
+Vamos retomar o código de nossa inserção. Leve em consideração que ele inclui somente um produto:
+       
+
+    PreparedStatement stmt = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
+    		stmt.setString(1, nome);
+    		stmt.setString(2, descricao);
+    		boolean resultado = stmt.execute();
+     		System.out.println("O resultado foi: " + resultado);
+    	 	ResultSet resultSet = stmt.getGeneratedKeys(); 
+     		while (resultSet.next()) {
+                int id = resultSet.getInt(1);
+                System.out.println(id + " gerado");
+            }
+     		resultSet.close();
+     		stmt.close();
+
+Mas e se desejamos incluir dois produtos? Podemos extrair um método no momento em que chamamos o método *statement.setString*. Extraímos o método *adiciona*:
+
+
+     public static void adiciona(Connection connection, String sql, String nome, String descricao) throws SQLException {
+    		PreparedStatement stmt = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
+    		stmt.setString(1, nome);
+    		stmt.setString(2, descricao);
+    
+    		boolean resultado = stmt.execute();
+    		
+     		System.out.println("O resultado foi: " + resultado);
+     		
+     		ResultSet resultSet = stmt.getGeneratedKeys();
+     		while (resultSet.next()) {
+                int id = resultSet.getInt(1);
+                System.out.println(id + " gerado");
+            }
+    
+     		resultSet.close();
+     		stmt.close();
+    	}
+
+E nosso método *main* passa a chamar o método *adiciona*:
+              
+
+     adiciona(connection, sql, "TV LCD", "TV de 32 polegadas");
+	 
+Da mesma maneira, podemos logo em seguida adicionar um segundo produto:
+       
+
+     adiciona(connection, sql, "TV LCD", "TV de 32 polegadas");
+     adiciona(connection, sql, "Blueray", "Blueray azul");
+
+###### Note que o statement será executado, terá seus parâmetros alterados e será executado novamente. 
+
+Sem problemas, rodamos o programa e dois produtos são adicionados no banco! Fazemos o select no manager e temos os produtos lá.
+
+Mas e se algo acontece de errado entre o primeiro e o segundo insert? 
+
+O programa já adicionou o primeiro produto. Vamos testar? Removemos os produtos novamente:
+
+
+    delete from Produto where id>3
+	
+E adicionamos um if dentro de nosso método adiciona para jogar uma Exception no caso do Blueray:
+ 
+
+     public static void adiciona(Connection connection, String sql, String nome, String descricao) throws SQLException {
+    		
+    		//erro proposital
+    		if (nome.equals("Blueray")) {
+                throw new IllegalArgumentException("Problema ocorrido");
+            }		
+    		PreparedStatement stmt = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
+    
+            // resto do método adiciona 
+    
+        }
+Executamos nosso programa e note que a TV é adicionada, mesmo que o Blueray gere um erro. Conferimos no banco de dados.
+
+Isto é, a cada novo statement do tipo insert (update, delete e similares), **o comando é comitado automaticamente para o servidor**, não dá para voltar atrás. 
+
+###### Este é o comportamento padrão de uma Connection segundo a especificação do JDBC. 
+
+Mas e se eu quiser executar **os dois inserts ou nada**? 
+
+Isto é, tudo ou nada. Ou executa os dois com sucesso ou nenhum. **Nesse caso precisamos desativar o auto commit**. Para isso fazemos logo após receber a conexão:
+          
+
+     connection.setAutoCommit(false);
+	 
+Voltamos no nosso banco de dados, removemos os produtos extras para ficar com 3 produtos novamente:
+
+
+    delete from Produto where id>3
+Se rodarmos novamente o programa e efetuarmos o select notamos que nada foi inserido no banco, nem a TV, nem o Blueray!
+
+Quando o auto commit está configurado como false precisamos indicar o momento de executar o commit, e não fizemos isso ainda. Vamos testar colocar o commit logo após adicionar o primeiro e o segundo produto?
+        
+
+    adiciona(connection, sql, "TV LCD", "TV de 32 polegadas");
+    connection.commit();
+    adiciona(connection, sql, "Blueray", "Blueray azul");
+    connection.commit();
+
+Rodamos novamente e agora sim a TV é gravada mas o blueray não.
+
+Vamos apagar novamente os produtos e ficar só com os 3 primeiros:
+
+
+    delete from Produto where id>3
+Queremos agora deixar explícito a maneira de commit e de voltar atrás em nossa decisão, de fazer um **rollback**. Isto é, deixamos explícito o commit no caso de sucesso dos dois itens adicionados:
+          
+
+    		try {
+    			PreparedStatement stmt = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
+    			
+    			stmt.setString(1, nome);
+    			stmt.setString(2, descricao);
+    			boolean resultado = stmt.execute();
+    			connection.commit();		
+    	 		System.out.println("O resultado foi: " + resultado);
+    	 		ResultSet resultSet = stmt.getGeneratedKeys();
+    	 		while (resultSet.next()) {
+    	            int id = resultSet.getInt(1);
+    	            System.out.println(id + " gerado");
+    	        }
+    	 		resultSet.close();
+    	 		stmt.close();
+    		}catch (Exception e) {
+    			e.printStackTrace();
+    		}
+E dentro do nosso catch desejamos voltar atrás, executar um rollback em nossa operação, connection.rollback:
+        
+
+     		}catch (Exception e) {
+    			e.printStackTrace();
+    			connection.rollback();
+                System.out.println("Rollback efetuado");
+    		}
+Mas temos também que fechar o statement que abrimos, onde fechamos ele? Dentro do try? Mas e se acontecer uma exception, não fecharemos: precisamos do close dentro de um bloco **finally**. E precisamos conferir que ela foi aberto com sucesso. São muitos detalhes pequenos que precisamos cuidar para fechar tudo o que abrimos em blocos do tipo **try/catch/finally**! 
+
+###### Para evitar ter que se preocupar com o caso de fechar tais recursos, o Java 7 introduziu a construção try(recurso). Se abrirmos uma conexão, ou qualquer coisa "fechável", ela será automaticamente fechada quando o bloco try terminar, seja através de um sucesso ou de uma exception/error. Para evitar ter que se preocupar com o caso de fechar tais recursos, o Java 7 introduziu a construção try(recurso). Se abrirmos uma conexão, ou qualquer coisa "fechável", ela será automaticamente fechada quando o bloco try terminar, seja através de um sucesso ou de uma exception/error. 
+
+Portanto podemos abrir a conexão com:
+      
+
+    		try(Connection connection = Database.getConnection()) {
+    	 		String sql = "insert into Produto (nome, descricao) values (?, ?)";
+    	 		adiciona(connection, sql, "TV LCD", "TV de 32 polegadas");	
+    	 		adiciona(connection, sql, "Blueray", "Blueray azul");
+    		}
+E podemos fazer a mesma coisa para o prepared statement:
+        
+
+    		try(PreparedStatement stmt = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+    			stmt.setString(1, nome);
+    			stmt.setString(2, descricao);
+    			boolean resultado = stmt.execute();
+    					
+    	 		System.out.println("O resultado foi: " + resultado);
+    	 		ResultSet resultSet = stmt.getGeneratedKeys();
+    	 		while (resultSet.next()) {
+    	            int id = resultSet.getInt(1);
+    	            System.out.println(id + " gerado");
+    	        }
+    	 		resultSet.close();
+    		}
+###### Note que agora não nos preocupamos mais em fechar os recursos que abrimos dentro do try. O compilador garante que eles serão fechados!
+
+Se executarmos nosso sistema agora, podemos acessar o banco e verificamos que nada foi inserido. Inclusive o console mostra que o rollback foi efetuado. Isto é, enviamos os dois insert para o banco, mas como deu uma exception pedimos para ele voltar atrás em tudo, efetuar o rollback, portanto nada foi inserido.
+
+Entao a classe **TestaInsercao** fica assim:
+
+
+    public static void main(String[] args) throws SQLException {
+    		try(Connection connection = Database.getConnection()) {
+    	 		String sql = "insert into Produto (nome, descricao) values (?, ?)";
+    	 		adiciona(connection, sql, "TV LCD", "TV de 32 polegadas");	
+    	 		adiciona(connection, sql, "Blueray", "Blueray azul");
+    	 		connection.commit();
+    		}catch (Exception e) {
+    			e.printStackTrace();
+                System.out.println("Rollback efetuado");
+    		}
+     		System.out.println("Conexao Fechada!");
+    }
+    
+    public static void adiciona(Connection connection, String sql, String nome, String descricao) throws SQLException {
+    		//erro proposital
+    		if (nome.equals("Blueray")) {
+                throw new IllegalArgumentException("Problema ocorrido");
+            }
+    		try(PreparedStatement stmt = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+    			
+    			stmt.setString(1, nome);
+    			stmt.setString(2, descricao);
+    			boolean resultado = stmt.execute();
+    					
+    	 		System.out.println("O resultado foi: " + resultado);
+    	 		ResultSet resultSet = stmt.getGeneratedKeys();
+    	 		while (resultSet.next()) {
+    	            int id = resultSet.getInt(1);
+    	            System.out.println(id + " gerado");
+    	        }
+    	 		resultSet.close();
+    		}
+    	}
+
 
