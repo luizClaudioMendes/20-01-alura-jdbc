@@ -559,3 +559,180 @@ Entao a classe **TestaInsercao** fica assim:
     	}
 
 
+## AULA 5
+Até esse instante trabalhamos com aplicações que fazem uma única conexão ao banco de dados. Mas o que acontece em aplicações web ou cliente servidor onde temos dezenas, centenas ou até mesmo milhares de usuários acessando o serviço simultaneamente?
+
+Se mantemos uma única conexão o tempo todo, assim que o primeiro usuário acessa e enquanto ele executa suas queries, o segundo usuário espera. Se um terceiro usuário fizer uma requisição ele terá que esperar o término das requisições do primeiro e do segundo usuário. Dessa maneira vamos enfileirando todas as requisições com uma única conexão para atendê-las. É similar a uma fila do banco: diversas pessoas vão entrando na fila e só existe um único caixa para atender, uma única conexão para atender. Enquanto o primeiro não termina, todos esperam.
+
+Claramente, em geral, essa não é uma boa solução. Mas e se abrirmos e fecharmos uma nova conexão para cada novo usuário/requisição? O custo de abrir e fechar uma conexão é alto: é necessário enviar e receber dados de autenticação via TCP para o banco que é remoto. Além disso, se o número de usuários cresce muito, não teremos conexões suficientes no banco para responder pelo desejo dos usuários. O mesmo acontece na fila do banco: criar novos caixas e fechá-los a todo instante que chega um novo cliente é muito custoso, mas seria ótimo, claro.
+
+Que tal o meio termo? Mantemos 5 conexões abertas o tempo todo e a medida que chegam usuários, eles acessam essas 5 conexões. Quando eles vão liberando, o próximo da fila entra e usa a conexão disponível. Desta maneira somos justos (todos serão atendidos na ordem que chegaram), disponibilizamos um número maior de recursos/conexões (não somente uma) mas também não sobrecarregamos com o número de conexões.
+
+Essa abordagem, onde disponibilizamos um número limitado de objetos (conexões), é chamado de **pool**. Temos um **pool de conexões**, de onde virão os objetos para atender os requerimentos de cada cliente. A medida que os clientes terminam sua requisição, os objetos são devolvidos para esse pool.
+
+###### Poderíamos implementar nosso pool de conexões mas os drivers do JDBC já implementam isso para nós (além de diversas bibliotecas Java), através da interface DataSource.
+
+Vamos ao código? 
+
+Altere o nome da Classe **Database** para **ConnectionPool**.
+
+Vamos agora deixar de criar uma **Connection** nova a cada requisição e passar a usar um **pool**. 
+Quando executarmos um new **Database** vamos criar nosso pool. 
+No caso do **MySQL** usamos a classe **ComboPooledDataSource** do **C3PO**. 
+
+O **MySQL** não tem uma classe dessas por padrão em suas bibliotecas, mas há outras duas bibliotecas muito famosas que são utilizadas para isso: **Apache DBCP** e **C3P0**.
+
+###### Tem várias outras bibliotecas para isso, mas essas duas são bastante confiáveis. Inclusive, a C3P0 é muito utilizada junto com Hibernate.
+
+Para utilizá-las, é bastante simples o processo. Você deve fazer o download do(s) jar(s) necessários no site deles e colocar no seu projeto.
+
+Segue um código de exemplo de cada:
+#### Apache DBCP
+
+
+    import java.sql.*;
+    import org.apache.commons.dbcp.*;
+    
+    public class C3POPConnectionExample {
+        public static void main(String args[]) throws Exception {
+            BasicDataSource dataSource = new BasicDataSource();
+            dataSource.setDriverClassName("com.mysql.jdbc.Driver");
+            dataSource.setUrl("jdbc:mysql://localhost:3306/mydatabase");
+            dataSource.setUsername("root");
+            dataSource.setPassword("");
+            dataSource.setInitialSize(1);
+            Connection con = dataSource.getConnection();
+            System.out.println("Connection Object information : " + con);
+        }
+    }
+	
+#### C3P0
+
+
+    import java.sql.*;
+    import com.mchange.v2.c3p0.ComboPooledDataSource;
+    
+    public class DBCPConnectionExample {
+        public static void main(String args[]) throws Exception {
+            ComboPooledDataSource connectionPoolDatasource = new ComboPooledDataSource();
+            connectionPoolDatasource.setDriverClass("com.mysql.jdbc.Driver");
+            connectionPoolDatasource.setJdbcUrl("jdbc:mysql://localhost:3306/mydatabase");
+            connectionPoolDatasource.setUser("root");
+            connectionPoolDatasource.setPassword("");
+            connectionPoolDatasource.setMinPoolSize(1);
+            connectionPoolDatasource.setAcquireIncrement(5);
+            connectionPoolDatasource.setMaxPoolSize(20);
+            Connection con = connectionPoolDatasource.getConnection();
+            System.out.println("Connection Object information : " + con);
+        }
+    }
+
+  a classe final fica assim:
+
+
+    public class ConnectionPool {
+    	
+    	//C3PO pool of connections
+    	ComboPooledDataSource pool;
+    	
+    	ConnectionPool() throws Exception {
+    		pool = new ComboPooledDataSource();
+    		pool.setDriverClass("com.mysql.jdbc.Driver");
+    		pool.setJdbcUrl("jdbc:mysql://localhost:3306/loja-virtual");
+    		pool.setUser("root");
+    		pool.setPassword("root");
+    		pool.setMinPoolSize(1);
+    		pool.setAcquireIncrement(5);
+    		pool.setMaxPoolSize(20);
+    	}
+    	
+    	Connection getConnection() throws SQLException {
+     		System.out.println("Conexao Aberta!");
+    		return pool.getConnection();
+    	}
+    }
+
+
+Pronto! O que falta é armazenarmos esse pool como uma variável membro do nosso **Database**, além de a cada chamada do método *getConnection* invocarmos o método *pool.getConnection()*:
+
+Repare que utilizamos a interface **DataSource** pois ela só disponibiliza os getters, não os setters. Não desejamos alterar os setters após a construção de nosso pool, portanto usamos a interface. 
+
+Tiraremos também a característica static de nosso método: é importante criar um Database (e consequentemente o pool) antes de invocar o método.
+
+Agora o nosso **TestaListagem** deixa de chamar o método diretamente (estaticamente) e passa a instanciar o **Database**:
+       
+
+    Database database = new Database();
+    Connection connection = database.getConnection();
+		   
+Executamos a listagem e o resultado é o esperado, afinal estamos abrindo um pool de conexões e pegando uma única conexão.
+
+Agora vamos executar o mesmo trabalho 100 vezes? 
+
+Executamos mais uma vez o programa e abrimos o arquivo de log, vemos que somente as 4 conexoes do mysql estão lá.
+
+Vamos colocar um for de 0 até 100 após abrir o connection pool e antes de abrir a conexão:
+
+
+
+    public static void main(String[] args) throws SQLException {
+    		ConnectionPool connectionPool;
+    		
+    		try{
+    			
+    			//a connection aqui abre somente uma connection pool
+    			connectionPool = (ConnectionPool) new ConnectionPool();
+    			
+    			for(int i = 0; i < 100; i++) {
+    				//a connection aqui abre várias conexões o que é oneroso
+    //				connection = (ConnectionPool) new ConnectionPool();
+    				
+    				Connection c = connectionPool.getConnection();
+    				
+    				Statement statement = c.createStatement();
+    				System.out.println("Statement Aberta!");
+    				boolean resultado = statement.execute("select * from Produto");
+    				ResultSet resultSet = statement.getResultSet();
+    				System.out.println("ResultSet Aberto!");
+    				
+    				while(resultSet.next()) {
+    					int id = resultSet.getInt("id");
+    					String nome = resultSet.getString("nome");
+    					String descricao = resultSet.getString("descricao");
+    					System.out.println(id + ":" + nome +":"+ descricao);
+    					
+    				}
+    				resultSet.close();
+    				System.out.println("ResultSet Fechado!");
+    				statement.close();
+    				System.out.println("Statement Fechada!");
+    				c.close();
+    				System.out.println("Conexao Fechada!");
+    			}
+    			
+    			
+    			
+    		}catch (Exception e ) {
+    			e.printStackTrace();
+    		}
+    	}
+
+Rodamos novamente e verificamos o log. Apesar de termos invocado o método getConnection e close 100 vezes, temos que somente uma conexão foi aberta e fechada! Perfeito! Quando o close é invocado, a conexão é devolvida para o pool de conexões. O próximo getConnection pede uma conexão do pool e recebe a conexão anterior!
+
+Mas qual a grande diferença de um pool? Vamos ver o custo de abrir e fechar a conexão 100 vezes, basta mover a linha de criação do database para dentro do pool (conforme marcado em vermelho.
+        
+Rodamos a aplicação e agora a execução demora bastante tempo. Além disso, o arquivo de log fica cheio de conexões sendo fechadas. Com esse exemplo fica claro que não usar um connection pool pode ser custoso para uma aplicação cliente servidor como as aplicações web tradicionais.
+
+Alguns servidores na cloud pedem para não usarmos connection pool pois eles mesmos já trazem seu connection pool ou lidam com tais situações. Os servidores Java EE também já fornecem um connection pool de maneira declarativa (configurando em algum arquivo externo a aplicação) e basta recebermos o **DataSource** dentro de nossa aplicação.
+
+#### Pool
+
+Em um pool simples com 9 conexões, o que acontece quando o 10º usuário se conecta e todas estão ocupadas? O que acontece quando, posteriormente, o terceiro usuário termina sua tarefa? Que variações você sugeriria fazer na implementação de um pool de conexões para evitar que um usuário espere muito tempo? E o que fazer para evitar que em horários de pico o servidor não fique com poucas conexões para um número grande de usuários?
+
+###### Quando o 10º usuário se conecta, ele fica aguardando a liberação de uma conexão.
+
+###### Quando o 3º usuário termina a sua tarefa, a conexão que foi liberada vai para o próximo usuário aguardando, neste caso, o 10º.Quando o 3º usuário termina a sua tarefa, a conexão que foi liberada vai para o próximo usuário aguardando, neste caso, o 10º.
+
+acho que a melhor implementação de um pool de conexões é a quantidade de conexões ser dinâmica, tendo um mínimo que fica aberto e quando a quantidade de usuários aumenta e chega perto do máximo, este é acrescido de mais quantidade de conexões abertas.  quando o pico de utilização desce, as conexões abertas desnecessariamente vão sendo fechadas dinamicamente.
+
+mas, uma abordagem estática, uma quantidade razoável de conexões deve ser aberta para possibilitar que mais usuários usem as conexões e na fiquem na lista de espera.
