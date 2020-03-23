@@ -906,3 +906,267 @@ Sem nenhuma parte relativa a conexão. Mais limpa e com a informação em um só
 O **DAO** é um **padrão de design** que utilizamos para **isolar o código SQL** (ou qualquer outro código de acesso à um repositório de dados). Ao adotá-lo, sabemos que existe um único grupo de classes que trabalha com um sistema externo de dados, e podemos nos preocupar somente com essas classes quando trabalharmos nessa área.
 
 
+## AULA 7
+Vamos criar agora uma nova tabela para trabalharmos com relacionamentos entre ela e a tabela **Produto**. O nome dela será **Categoria**, contendo um id gerado automaticamente (chave primária) e o nome (string tradicional):
+
+
+
+    create table Categoria (id  INTEGER PRIMARY KEY auto_increment, nome varchar(255));
+Ao atualizarmos a view do mysql conseguimos visualizar tanto a tabela **Categoria** quanto a **Produto**:
+
+Agora vamos atualizar nossos produtos existentes para colocá-los em determinadas categorias. Para isso faremos primeiro um select para verificar quais produtos existem no banco:
+
+
+    select * from Produto
+Temos uma geladeira, um ferro, um notebook e duas mesas. Criaremos três categorias para agrupar estes produtos:
+
+- eletrodomésticos para a geladeira e o ferro;
+- eletrônicos para o notebook e móveis para as mesas. 
+
+Executaremos cada um dos sql a seguir sem os ponto e vírgula do fim da linha e um por vez:
+
+
+    insert into Categoria (nome) values ('Eletrodoméstico');
+
+
+    insert into Categoria (nome) values ('Eletrônico');
+
+
+    insert into Categoria (nome) values ('Móvel');
+
+Agora podemos conferir nossas categorias:
+
+
+    select * from Categoria;
+
+Precisamos encontrar alguma maneira de dizer que o produto 1 está na categoria 1, o produto 2 na categoria 1, o produto 3 na categoria 2 etc. Isto é, precisamos dizer o id da categoria para cada um dos nossos produtos, portanto adicionaremos o campo categoria_id dentro da tabela Produto:
+
+
+
+    alter table Produto add column categoria_id integer;
+	
+E conferimos que a coluna foi criada com sucesso. Note que as categorias estão como null por padrão: no nosso caso não obrigamos nenhum produto a ter uma categoria.
+
+
+    select * from Produto
+Marcaremos agora o produto 1 e 2 com a categoria de Eletrodoméstico (categoria 1):
+
+
+    update Produto set categoria_id=1 where id in (1,2);
+	
+Marcamos o produto 3 com a categoria Eletrônico:
+
+
+
+    update Produto set categoria_id=2 where id in (3);
+	
+E marcamos os outros produtos com a categoria Móvel:
+
+
+    update Produto set categoria_id=3 where id > 3;
+	
+Conferimos novamente nossos produtos usando o select:
+
+Agora atacaremos o código do modelo, nosso código Java. Analogamente ao que fizemos com a tabela **Produto**, criaremos agora uma classe chamada **Categoria**, com id e nome. Adicionamos o construtor com os dois argumentos:
+
+
+    public class Categoria {
+     
+     	private Integer id;
+     	private String nome;
+     	private List<Produto> produtos;
+     
+     	public Categoria() {
+      		super();
+    	}
+     
+     public Categoria(Integer id, String descricao) {
+      	super();
+      	this.id = id;
+      	this.nome = descricao;
+     }
+    //getters e setters
+     @Override
+     public String toString() {
+      	return "["+id+"]"+" " +nome;
+     }
+    }
+
+Criamos agora nosso teste **TestaCategorias** com o método *main* 
+ 
+
+    public static void main(String[] args) throws Exception {   
+      List<Categoria> categorias = new CategoriaDao().lista();
+      
+      for (Categoria cat : categorias) {
+       for (Produto prod : new ProdutoDao().lista(cat)) {
+        System.out.println("Categoria: "+ cat + " - Produto: "+ prod);
+        
+       }
+      }
+     }
+ 
+Agora que sabemos o que precisamos no nosso DAO, vamos criá-lo:
+
+
+    public List<Categoria> lista() {
+      	List<Categoria> resultado = new ArrayList<>();
+      
+		  try {
+			Statement statement = connection.createStatement();
+			statement.execute("select * from Categoria");
+			ResultSet resultSet  = statement.getResultSet();
+			while(resultSet.next()) {
+				Categoria cat = new Categoria();
+				cat.setId(resultSet.getInt("id"));
+				cat.setNome(resultSet.getString("nome"));
+				resultado.add(cat);
+			}
+			resultSet.close();
+			statement.close();
+			connection.commit();
+		  } catch (SQLException e) {
+			e.printStackTrace();
+		  }
+		  return resultado;
+     }
+	 
+Pronto. Criamos uma lista de categorias, executamos a query, para cada resultado adicionamos a categoria à lista e finalmente retornamos ela completa.
+
+Temos que adicionar o getter do nome da categoria, claro. 
+
+Rodamos o programa e temos na saída a lista das categorias.
+
+Agora criaremos nosso outro método de listagem, algo como busca e recebe a categoria:
+   
+
+    public List<Produto> lista(Categoria categoria) {
+      List<Produto> resultado = new ArrayList<>();
+      
+      try {
+       	String sql = "select * from Produto where categoria_id = ?";
+       	PreparedStatement statement = connection.prepareStatement(sql);
+       	statement.setInt(1, categoria.getId());
+       	statement.execute();
+      	 ResultSet resultSet = statement.getResultSet();
+       	while(resultSet.next()) {
+        	Produto produto = transformaResultadosEmProdutos(resultSet);
+        	resultado.add(produto);
+       	}
+       	resultSet.close();
+       	statement.close();
+       	connection.commit();
+      } catch (SQLException e) {
+       	e.printStackTrace();
+      }
+      return resultado;
+     }
+	 
+Adicionamos também o getter do id da categoria. Pronto. 
+
+Voltamos à nossa classe de teste e adicionamos a invocação ao método de busca do **ProdutosDAO**:
+ 
+
+    public static void main(String[] args) throws Exception {   
+      	List<Categoria> categorias = new CategoriaDao().listaComProdutos();
+      
+      	for (Categoria cat : categorias) {
+       		for (Produto prod : cat.getProdutos()) {
+        		System.out.println("Categoria: "+ cat + " - Produto: "+ prod);
+        
+       		}
+      }
+ 
+
+Agora basta executarmos nosso programa para ter o resultado que desejávamos.
+
+Mas quantas queries executamos? Uma? Duas? Quatro. 
+
+Note que executamos uma primeira query para trazer todas as categorias. Depois disso executamos uma query para cada categoria, isto é: mais 3 queries. Se nosso sistema possui 1000 categorias, executaríamos 1001 queries. Estamos executando **N+1** queries, onde **N é o número de elementos retornados pela primeira pesquisa**. Isto é muito ruim, uma vez que cada pesquisa tem que ir e voltar de um sistema remoto, serializando dados etc.
+
+Como podemos evitar executar uma query para cada categoria? 
+
+Poderíamos trazer todos os produtos de uma única vez, através de um join:
+
+
+    select c.id as id_cat, c.nome as nome_cat, p.id as id_p, p.nome as nome_prod, p.descricao as desc_prod, p.categoria_id as cat_prod from Categoria as c
+    join Produto as p on p.categoria_id = c.id
+	
+Pronto. Com um único join trouxemos todos os dados da categoria e dos produtos que desejamos. Executamos essa query no banco de dados.
+
+###### O join traz os valores da categoria uma vez para cada produto que ela possui.
+
+O join traz os valores da categoria uma vez para cada produto que ela possui. Isto é bom para os produtos, mas não tão bom para as categorias. 
+
+Executando novamente temos que cada campo tem um nome distinto: o prefixo "p" é usado para os campos do produto e o prefixo "c" para os campos da categoria.
+
+Agora precisamos implementar um novo método de listagem que já traga as categorias e os produtos de uma só vez. Chamemos este método de *listaComProdutos* em nosso **CategoriasDAO**:
+
+
+    public List<Categoria> listaComProdutos() {
+      List<Categoria> resultado = new ArrayList<>();
+      Categoria ultima = null;
+      
+      try {
+       Statement statement = connection.createStatement();
+       statement.execute("select c.id as id_cat, c.nome as nome_cat, p.id as id_p, p.nome as nome_prod, p.descricao as desc_prod, "
+         + "p.categoria_id as cat_prod from Categoria as c\r\n" +
+         "join Produto as p on p.categoria_id = c.id "
+         + "order by id_cat");
+       ResultSet resultSet  = statement.getResultSet();
+       while(resultSet.next()) {
+        if(ultima==null || !ultima.getNome().equals(resultSet.getString("nome_cat"))) {
+                    	Categoria categoria = new Categoria(resultSet.getInt("id_cat"), resultSet.getString("nome_cat"));
+                    	resultado.add(categoria);
+                    	ultima = categoria;
+                	}
+        
+        Produto prod = new Produto();
+        prod.setId(resultSet.getInt("id_p"));
+        prod.setNome(resultSet.getString("nome_prod"));
+        prod.setDescricao(resultSet.getString("desc_prod"));
+        prod.setCategoria(ultima.getId());
+        
+        if(ultima.getProdutos() == null) {
+         ultima.setProdutos(new ArrayList<>());
+        }
+        
+        ultima.getProdutos().add(prod);
+       }
+       resultSet.close();
+       statement.close();
+       connection.commit();
+      } catch (SQLException e) {
+       e.printStackTrace();
+      }
+      return resultado;
+     }
+	 
+Alteramos nosso método de teste para utilizar o novo método listaComProdutos:
+
+    
+
+    public static void main(String[] args) throws Exception {   
+      List<Categoria> categorias = new CategoriaDao().listaComProdutos();
+      
+      for (Categoria cat : categorias) {
+       for (Produto prod : cat.getProdutos()) {
+        System.out.println("Categoria: "+ cat + " - Produto: "+ prod);
+        
+       }
+      }
+     }
+
+Nosso código dentro do laço se resume então a carregar o id e o nome da categoria, verificar se a categoria mudou e em caso positivo trocá-la, criar um produto e adicionar o produto na categoria.
+
+Pronto, rodamos nossa aplicação e temos que com uma única query e um join trouxemos todas as categorias com todos os produtos, evitando o problema do N+1.
+
+Mesmo assim, o **problema do N+1** é muito famoso e até mesmo o mal uso de tais bibliotecas pode causar efeitos negativos em uma aplicação.
+
+Faça a escolha da biblioteca que deseja utilizar (JDBC, Hibernate, JPA etc) de acordo com as necessidades de seu projeto e otimize as queries também de acordo com aquilo que você e sua equipe precisam.
+ 
+ 
+mais informações úteis:
+http://blog.caelum.com.br/os-7-habitos-dos-desenvolvedores-hibernate-e-jpa-altamente-eficazes/
+
+
