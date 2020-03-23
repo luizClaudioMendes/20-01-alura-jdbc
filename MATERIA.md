@@ -736,3 +736,173 @@ Em um pool simples com 9 conexões, o que acontece quando o 10º usuário se con
 acho que a melhor implementação de um pool de conexões é a quantidade de conexões ser dinâmica, tendo um mínimo que fica aberto e quando a quantidade de usuários aumenta e chega perto do máximo, este é acrescido de mais quantidade de conexões abertas.  quando o pico de utilização desce, as conexões abertas desnecessariamente vão sendo fechadas dinamicamente.
 
 mas, uma abordagem estática, uma quantidade razoável de conexões deve ser aberta para possibilitar que mais usuários usem as conexões e na fiquem na lista de espera.
+
+
+## AULA 6
+Vamos criar a classe **Produto** e colocá-la no pacote **modelo**:
+
+
+    package br.com.caelum.jdbc.modelo;
+    
+    public class Produto {
+    
+        private Integer id;
+        private String nome;
+        private String descricao;
+		
+Vamos criar agora um novo exemplo que tenta inserir um **Produto** no banco. 
+
+Para isso adicionamos uma nova classe de teste e instanciamos um **Produto**. 
+
+###### Note que passaremos no construtor tudo o que um produto realmente precisa:Note que passaremos no construtor tudo o que um produto realmente precisa:
+  
+
+     public static void main(String[] args) throws SQLException {
+            Produto mesa = new Produto("Mesa Azul", "Mesa com 4 pés");
+    
+            try (Connection con = new ConnectionPool().getConnection()) {
+                // desejamos salvar um produto!
+            }
+    
+        }
+Crie o construtor.
+
+Vamos voltar ao nosso teste e criar tudo o que precisamos para salvar o produto:
+
+
+    public class InsereProduto {
+    	static ConnectionPool connectionPool;
+    
+    	public static void main(String[] args) throws SQLException {		
+    		Produto produto = new Produto("Pneu de carro", "Pneu de carro aro 18");
+    		
+    		try{	
+    			connectionPool = (ConnectionPool) new ConnectionPool();
+    			Connection connection = connectionPool.getConnection();
+    			connection.setAutoCommit(false);
+    			String sql = "insert into Produto (nome, descricao) values (?, ?)";
+    			adiciona(connection, sql, produto);
+    	 		connection.commit();
+    		}catch (Exception e) {
+    			e.printStackTrace();
+                System.out.println("Rollback efetuado");
+    		}
+    	}
+    
+    	private static Produto adiciona(Connection connection, String sql, Produto produto) throws SQLException {
+    			try(PreparedStatement stmt = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+    				stmt.setString(1, produto.getNome());
+    				stmt.setString(2, produto.getDescricao());
+    				boolean resultado = stmt.execute();
+    						
+    		 		System.out.println("O resultado foi: " + resultado);
+    		 		ResultSet resultSet = stmt.getGeneratedKeys();
+    		 		while (resultSet.next()) {
+    		 			produto.setId(resultSet.getInt(1));
+    		            System.out.println(produto.getId() + " gerado");
+    		        }
+    		 		resultSet.close();
+    		 		return produto;
+    			}	
+    	}
+    }
+	
+Executamos nosso programa e agora podemos encontrar a produto no banco:
+
+Vou sobrescrever agora o método *toString* de nosso **Produto**:
+   
+
+    @Override
+        public String toString() {
+            return String.format("[produto: %d %s %s]", id, nome, descricao);
+        }
+Rodamos diversas vezes e temos a saída que mostra qual o produto que foi inserido:
+
+Para deixar o banco limpo, voltamos a ter somente três produtos:
+
+
+
+    delete from Produto where id>3
+	
+Mas toda vez que eu faço um select, um insert, um delete, eu tenho que fazer os try de Connection, try PreparedStatement, try ResultSet etc. Tudo que acessa o banco de dados ficará espalhado na minha aplicação. Não parece ser uma boa alternativa, uma vez que quem mantém o código terá que conhecer todos os pontos que a aplicação acessa o banco, o que costuma ser um ponto comum de falha. 
+
+Precisamos criar um **DAO** e colocar toda a parte de abrir conexoes nele:
+
+    package br.jdbc.dao;
+    
+    import java.sql.Connection;
+    import java.sql.PreparedStatement;
+    import java.sql.ResultSet;
+    import java.sql.SQLException;
+    import java.sql.Statement;
+    
+    import br.jdbc.Connection.ConnectionPool;
+    import br.jdbc.modelo.Produto;
+    
+    public class ProdutoDao {
+    	private ConnectionPool connectionPool;
+    	private Connection connection;
+    	
+    	public ProdutoDao() throws SQLException, Exception {
+    		super();
+    		getConexao();
+    	}
+    	
+    	public Produto salva(Produto produto) {
+    		try{	
+    			String sql = "insert into Produto (nome, descricao) values (?, ?)";
+    			produto = adiciona(sql, produto);
+    	 		
+    		}catch (Exception e) {
+    			e.printStackTrace();
+                System.out.println("Rollback efetuado");
+    		}
+    		return produto;
+    	}
+    
+    	private Produto adiciona(String sql, Produto produto) throws SQLException {
+    		try(PreparedStatement stmt = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+    			stmt.setString(1, produto.getNome());
+    			stmt.setString(2, produto.getDescricao());
+    			boolean resultado = stmt.execute();
+    					
+    	 		System.out.println("O resultado foi: " + resultado);
+    	 		ResultSet resultSet = stmt.getGeneratedKeys();
+    	 		while (resultSet.next()) {
+    	 			produto.setId(resultSet.getInt(1));
+    	            System.out.println(produto + " gerado");
+    	        }
+    	 		resultSet.close();
+    	 		
+    		}	
+    		connection.commit();
+    		return produto;
+    	}
+    
+    	public void getConexao() throws Exception, SQLException {
+    		connectionPool = (ConnectionPool) new ConnectionPool();
+    		connection = connectionPool.getConnection();
+    		connection.setAutoCommit(false);
+    	}
+    
+    }
+    
+Já no nosso **InsereProduto**  ficará assim:
+
+
+    public class InsereProduto {
+    	public static void main(String[] args) throws Exception {		
+    		Produto produto = new Produto("Pneu de carro", "Pneu de carro aro 18");
+    		
+    		new ProdutoDao().salva(produto);
+    	}
+    }
+
+
+Sem nenhuma parte relativa a conexão. Mais limpa e com a informação em um só lugar. Mais facil de reaproveitar o codigo.
+
+###### O **DAO** é o objeto que centraliza o acesso aos dados. Como temos em geral diversas coisas a serem feitas com o acesso ao repositório de dados, é comum que seja criado pelo menos um DAO por cada modelo que trabalhamos em nosso projeto.
+
+O **DAO** é um **padrão de design** que utilizamos para **isolar o código SQL** (ou qualquer outro código de acesso à um repositório de dados). Ao adotá-lo, sabemos que existe um único grupo de classes que trabalha com um sistema externo de dados, e podemos nos preocupar somente com essas classes quando trabalharmos nessa área.
+
+
